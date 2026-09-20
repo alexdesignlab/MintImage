@@ -166,9 +166,12 @@ void main() {
 
     test('skips reasoning deltas and keeps only the answer text', () async {
       final server = await _startServer((request) async {
+        // 必须显式声明 utf-8：HttpResponse.write 默认按 latin-1 编码，
+        // 负载里的中文会直接写失败。
         request.response.headers.contentType = ContentType(
           'text',
           'event-stream',
+          charset: 'utf-8',
         );
         // Responses 协议会把思考过程也按 delta 推送，其中的文本常常复述
         // 任务说明与原始提示词；这些内容不能进入优化结果。
@@ -201,6 +204,7 @@ void main() {
         request.response.headers.contentType = ContentType(
           'text',
           'event-stream',
+          charset: 'utf-8',
         );
         request.response.write(
           'data: ${jsonEncode({'type': 'content_block_delta', 'delta': {'type': 'thinking_delta', 'thinking': '先分析提示词', 'text': '思考过程不应进入结果'}})}\n\n'
