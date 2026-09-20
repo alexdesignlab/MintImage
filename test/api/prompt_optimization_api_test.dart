@@ -163,6 +163,104 @@ void main() {
         expect(result, 'gemini prompt');
       },
     );
+
+    test('skips reasoning deltas and keeps only the answer text', () async {
+      final server = await _startServer((request) async {
+        request.response.headers.contentType = ContentType(
+          'text',
+          'event-stream',
+        );
+        // Responses 协议会把思考过程也按 delta 推送，其中的文本常常复述
+        // 任务说明与原始提示词；这些内容不能进入优化结果。
+        request.response.write(
+          'data: ${jsonEncode({'type': 'response.reasoning_summary_text.delta', 'delta': '优化方向：强化 原始提示词：cat'})}\n\n'
+          'data: ${jsonEncode({'type': 'response.reasoning_text.delta', 'delta': '我需要先分析这个提示词'})}\n\n'
+          'data: ${jsonEncode({'type': 'response.output_text.delta', 'delta': '一只白猫'})}\n\n'
+          'data: ${jsonEncode({'type': 'response.output_text.delta', 'delta': '，柔和逆光'})}\n\n'
+          'data: [DONE]\n\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final result = await const PromptOptimizationApi().optimize(
+        prompt: 'cat',
+        direction: PromptOptimizationDirection.strengthen,
+        profile: _profileFor(
+          server,
+          protocol: PromptOptimizationProtocol.openAiResponses,
+        ),
+        timeoutSeconds: 30,
+      );
+
+      expect(result, '一只白猫，柔和逆光');
+    });
+
+    test('skips claude thinking deltas', () async {
+      final server = await _startServer((request) async {
+        request.response.headers.contentType = ContentType(
+          'text',
+          'event-stream',
+        );
+        request.response.write(
+          'data: ${jsonEncode({'type': 'content_block_delta', 'delta': {'type': 'thinking_delta', 'thinking': '先分析提示词', 'text': '思考过程不应进入结果'}})}\n\n'
+          'data: ${jsonEncode({'type': 'content_block_delta', 'delta': {'type': 'text_delta', 'text': 'claude prompt'}})}\n\n'
+          'data: [DONE]\n\n',
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final result = await const PromptOptimizationApi().optimize(
+        prompt: 'cat',
+        direction: PromptOptimizationDirection.strengthen,
+        profile: _profileFor(
+          server,
+          protocol: PromptOptimizationProtocol.claudeMessages,
+        ),
+        timeoutSeconds: 30,
+      );
+
+      expect(result, 'claude prompt');
+    });
+
+    test('parses a plain JSON response when the relay ignores stream', () async {
+      final server = await _startServer((request) async {
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(
+          jsonEncode({
+            'output': [
+              {
+                'type': 'reasoning',
+                'content': [
+                  {'type': 'reasoning_text', 'text': '思考过程不应进入结果'},
+                ],
+              },
+              {
+                'type': 'message',
+                'content': [
+                  {'type': 'output_text', 'text': 'json prompt'},
+                ],
+              },
+            ],
+          }),
+        );
+        await request.response.close();
+      });
+      addTearDown(server.close);
+
+      final result = await const PromptOptimizationApi().optimize(
+        prompt: 'cat',
+        direction: PromptOptimizationDirection.strengthen,
+        profile: _profileFor(
+          server,
+          protocol: PromptOptimizationProtocol.openAiResponses,
+        ),
+        timeoutSeconds: 30,
+      );
+
+      expect(result, 'json prompt');
+    });
   });
 }
 

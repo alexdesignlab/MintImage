@@ -20,6 +20,19 @@ enum PromptOptimizationDirection {
   final String description;
 }
 
+/// 思考过程类事件或内容块的标记词，命中即视为非最终答案。
+///
+/// 不同协议叫法不同：Responses 用 reasoning、Claude 用 thinking，
+/// 因此按关键词匹配而不是精确枚举。
+const List<String> _reasoningEventMarkers = <String>[
+  'reasoning',
+  'thinking',
+  'refusal',
+  'function_call',
+  'tool_call',
+  'summary',
+];
+
 class PromptOptimizationApi {
   const PromptOptimizationApi({this.requestLogService});
 
@@ -344,13 +357,19 @@ class PromptOptimizationApi {
 
     final textBuffer = StringBuffer();
     Map<String, dynamic>? completedResponse;
+    final rawBuffer = StringBuffer();
     await for (final line
         in responseBody.stream
             .map<List<int>>((chunk) => chunk)
             .transform(utf8.decoder)
             .transform(const LineSplitter())) {
       final trimmed = line.trim();
+      if (trimmed.isEmpty || trimmed.startsWith('event:')) {
+        continue;
+      }
       if (!trimmed.startsWith('data:')) {
+        // 中转站可能忽略 stream 参数、直接返回 JSON，这里留存原始内容兜底。
+        rawBuffer.write(trimmed);
         continue;
       }
 
@@ -365,10 +384,15 @@ class PromptOptimizationApi {
       }
       final event = Map<String, dynamic>.from(decoded);
       final delta = event['delta'];
-      if (delta is String) {
-        textBuffer.write(delta);
-      } else if (delta is Map && delta['text'] is String) {
-        textBuffer.write(delta['text'] as String);
+      // Responses 协议会把模型的思考过程（reasoning）也按 delta 推送，
+      // 其中的文本常常复述任务说明与原始提示词，必须排除，
+      // 否则优化结果里会混进整段对话内容。
+      if (_isAnswerDelta(event, delta)) {
+        if (delta is String) {
+          textBuffer.write(delta);
+        } else if (delta is Map && delta['text'] is String) {
+          textBuffer.write(delta['text'] as String);
+        }
       }
 
       final response = event['response'];
@@ -380,7 +404,55 @@ class PromptOptimizationApi {
     if (textBuffer.isNotEmpty) {
       return {'output_text': textBuffer.toString()};
     }
-    return completedResponse ?? <String, dynamic>{};
+    if (completedResponse != null) {
+      return completedResponse;
+    }
+
+    // 没有收到任何流式事件：按普通 JSON 响应再试一次。
+    final raw = rawBuffer.toString();
+    if (raw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          return Map<String, dynamic>.from(decoded);
+        }
+      } catch (_) {
+        // 不是 JSON 就按空响应处理，交由上层报错。
+      }
+    }
+    return <String, dynamic>{};
+  }
+
+  /// 判断该流式事件是否携带最终答案文本。
+  ///
+  /// 只排除思考过程类事件：Responses 协议会推送
+  /// `response.reasoning_summary_text.delta` 等思考增量，Claude 会推送
+  /// `thinking_delta`。这些文本里常常复述任务说明与原始提示词，
+  /// 混进结果就表现为「把整段对话复制了下来」。
+  ///
+  /// 采用排除法而不是白名单：中转站可能自定义事件名，
+  /// 白名单会把正常文本一起丢掉。
+  bool _isAnswerDelta(Map<String, dynamic> event, Object? delta) {
+    if (_containsReasoningMarker(event['type'])) {
+      return false;
+    }
+    if (delta is Map && _containsReasoningMarker(delta['type'])) {
+      return false;
+    }
+    return true;
+  }
+
+  bool _containsReasoningMarker(Object? value) {
+    final text = value?.toString().toLowerCase() ?? '';
+    if (text.isEmpty) {
+      return false;
+    }
+    for (final marker in _reasoningEventMarkers) {
+      if (text.contains(marker)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   String _parseTextResponse(
@@ -435,6 +507,12 @@ class PromptOptimizationApi {
       final buffer = StringBuffer();
       for (final item in output) {
         if (item is! Map) {
+          continue;
+        }
+        // 只取最终回答项：reasoning 等项的 content 装的是思考过程。
+        // 部分中转站不返回 type，此时不做过滤。
+        final itemType = item['type']?.toString().toLowerCase() ?? '';
+        if (itemType.isNotEmpty && itemType != 'message') {
           continue;
         }
         final content = item['content'];
@@ -496,6 +574,10 @@ class PromptOptimizationApi {
           continue;
         }
         if (item is! Map) {
+          continue;
+        }
+        // 思考过程类内容块（如 reasoning_text）不能计入结果。
+        if (_containsReasoningMarker(item['type'])) {
           continue;
         }
         final text = switch (item['text']) {
