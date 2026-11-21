@@ -218,14 +218,17 @@ class _ApiProfileEditPageState extends ConsumerState<ApiProfileEditPage> {
                     ),
                     const SizedBox(height: 4),
                     if (_apiMode.supportsStreaming)
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('流式请求'),
-                        subtitle: const Text(
-                          '启用后发送 stream: true，可降低超时风险',
+                      Material(
+                        type: MaterialType.transparency,
+                        child: SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('流式请求'),
+                          subtitle: const Text(
+                            '启用后发送 stream: true，可降低超时风险',
+                          ),
+                          value: _useStreaming,
+                          onChanged: (v) => setState(() => _useStreaming = v),
                         ),
-                        value: _useStreaming,
-                        onChanged: (v) => setState(() => _useStreaming = v),
                       )
                     else
                       Padding(

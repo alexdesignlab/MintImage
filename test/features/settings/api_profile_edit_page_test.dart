@@ -291,11 +291,17 @@ Future<void> _selectMode(
 }
 
 Future<void> _saveEditor(WidgetTester tester) async {
+  final pageContext = tester.element(find.byType(ApiProfileEditPage));
+  ScaffoldMessenger.of(pageContext).removeCurrentSnackBar();
   FocusManager.instance.primaryFocus?.unfocus();
-  await tester.pump();
+  await tester.pumpAndSettle();
   final save = find.widgetWithText(ElevatedButton, '保存');
-  await tester.ensureVisible(save);
-  await tester.pump();
+  await tester.scrollUntilVisible(
+    save,
+    200,
+    scrollable: find.byType(Scrollable).first,
+  );
+  await tester.pumpAndSettle();
   await tester.tap(save);
   await tester.pumpAndSettle();
   expect(find.byType(ApiProfileEditPage), findsNothing);
