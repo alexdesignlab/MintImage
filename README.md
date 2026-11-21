@@ -13,7 +13,7 @@
 ![License](https://img.shields.io/badge/license-MIT-3DA639)
 [![Release](https://img.shields.io/github/v/release/aiqinxuancai/MintImage?color=FF7A59)](https://github.com/aiqinxuancai/MintImage/releases)
 
-[下载安装包](https://github.com/aiqinxuancai/MintImage/releases)
+[下载 Windows / Android 安装包](https://github.com/alexdesignlab/MintImage/releases/tag/profile-delete-0.0.28)
 
 </div>
 
@@ -46,10 +46,14 @@
 
 ## 🚀 快速开始
 
-1. 从 [Releases](https://github.com/aiqinxuancai/MintImage/releases) 下载对应平台的安装包
+1. 从 [Releases](https://github.com/alexdesignlab/MintImage/releases/tag/profile-delete-0.0.28) 下载对应平台的安装包
 2. 打开应用，进入设置页
 3. 填写 API 地址、密钥和模型名
 4. 回到主页，输入提示词，开始生成
+
+## 📱 Android 手机安装
+
+用手机浏览器打开 [0.0.28 发布页](https://github.com/alexdesignlab/MintImage/releases/tag/profile-delete-0.0.28)，在 Assets 中下载 `MintImage-Android-0.0.28.apk`，下载完成后点击安装。系统询问时允许当前浏览器安装应用。APK 包含 ARM64、ARM32 和 x86_64 架构，保留图片模型选择与配置删除功能。
 
 ## 🎛️ 选择图片模型
 
