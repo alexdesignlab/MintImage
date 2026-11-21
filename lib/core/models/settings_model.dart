@@ -72,6 +72,7 @@ class ApiProfile {
     required this.baseUrl,
     required this.apiKey,
     required this.model,
+    this.availableModels = const [],
     this.apiMode = ImageGenerationApiMode.images,
     this.useStreaming = false,
   });
@@ -96,12 +97,22 @@ class ApiProfile {
 
   factory ApiProfile.fromJson(Map<String, dynamic> json) {
     final apiMode = ImageGenerationApiMode.fromStorageValue(json['apiMode']);
+    final rawAvailableModels = json['availableModels'];
+    final availableModels = rawAvailableModels is List
+        ? rawAvailableModels
+              .whereType<String>()
+              .map((model) => model.trim())
+              .where((model) => model.isNotEmpty)
+              .toSet()
+              .toList()
+        : <String>[];
     return ApiProfile(
       id: json['id'] as String,
       name: json['name'] as String? ?? '默认',
       baseUrl: json['baseUrl'] as String? ?? 'https://api.openai.com',
       apiKey: json['apiKey'] as String? ?? '',
       model: json['model'] as String? ?? apiMode.defaultModel,
+      availableModels: availableModels,
       apiMode: apiMode,
       useStreaming: json['useStreaming'] as bool? ?? false,
     );
@@ -112,6 +123,7 @@ class ApiProfile {
   final String baseUrl;
   final String apiKey;
   final String model;
+  final List<String> availableModels;
   final ImageGenerationApiMode apiMode;
   final bool useStreaming;
 
@@ -134,6 +146,7 @@ class ApiProfile {
     String? baseUrl,
     String? apiKey,
     String? model,
+    List<String>? availableModels,
     ImageGenerationApiMode? apiMode,
     bool? useStreaming,
   }) {
@@ -143,6 +156,7 @@ class ApiProfile {
       baseUrl: baseUrl ?? this.baseUrl,
       apiKey: apiKey ?? this.apiKey,
       model: model ?? this.model,
+      availableModels: availableModels ?? this.availableModels,
       apiMode: apiMode ?? this.apiMode,
       useStreaming: useStreaming ?? this.useStreaming,
     );
@@ -155,6 +169,7 @@ class ApiProfile {
       'baseUrl': baseUrl,
       'apiKey': apiKey,
       'model': model,
+      'availableModels': availableModels,
       'apiMode': apiMode.storageValue,
       'useStreaming': useStreaming,
     };

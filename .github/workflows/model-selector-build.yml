@@ -1,0 +1,65 @@
+name: Model Selector Windows Build
+
+on:
+  push:
+    branches:
+      - work/local-customization
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: model-selector-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Test and build Windows
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies on GitHub
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+      - name: Run regression tests
+        run: flutter test --reporter expanded
+
+      - name: Build Windows application
+        run: flutter build windows --release --build-name 0.0.27 --build-number ${{ github.run_number }} --dart-define APP_VERSION=v0.0.27-model-selector
+
+      - name: Package portable application
+        shell: pwsh
+        run: |
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath MintImage-Windows-model-selector.zip
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $env:MINTIMAGE_VERSION = '0.0.27'
+          $env:MINTIMAGE_RELEASE_DIR = Join-Path $env:GITHUB_WORKSPACE 'build/windows/x64/runner/Release'
+          $env:MINTIMAGE_OUTPUT_DIR = $env:GITHUB_WORKSPACE
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' 'installer/mint_image.iss'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: MintImage-Windows-model-selector
+          path: |
+            MintImage-Windows-model-selector.zip
+            MintImage-Setup-0.0.27.exe
+          if-no-files-found: error
+          retention-days: 30

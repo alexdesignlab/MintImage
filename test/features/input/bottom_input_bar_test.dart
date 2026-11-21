@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:mint_image/core/api/model_list_api.dart';
 import 'package:mint_image/core/api/openai_client.dart';
 import 'package:mint_image/core/api/prompt_optimization_api.dart';
 import 'package:mint_image/core/models/generation_request.dart';
@@ -209,43 +210,126 @@ void main() {
     expect(container.read(settingsProvider).activeProfileId, 'api-2');
   });
 
-  testWidgets('生图模型面板按协议分组，切换后两套选择互不影响', (tester) async {
-    await _pumpInputBar(tester, settings: _settingsWithImageAndGrokProfiles);
-
-    // 当前使用 Image 配置，模型按钮展示其模型名。
-    expect(
-      tester.widget<Text>(find.byKey(const Key('image-model-chip-label'))).data,
-      'gpt-image-2',
+  testWidgets('selecting a model reuses the current API profile', (tester) async {
+    GenerationRequest? submittedRequest;
+    final api = _StubModelListApi();
+    await _pumpInputBar(tester,
+      settings: _settingsWithImageAndGrokProfiles,
+      modelListApi: api,
+      onSubmit: (request) async { submittedRequest = request; },
     );
 
     await tester.tap(find.byTooltip('切换生图模型'));
     await tester.pumpAndSettle();
-
-    expect(find.text('Image（OpenAI 图像）'), findsOneWidget);
-    expect(find.text('Grok Imagine'), findsOneWidget);
-    expect(find.text('grok-imagine-image-2.0'), findsOneWidget);
-
-    await tester.tap(find.text('grok-imagine-image-2.0'));
+    expect(api.requestedProfile?.id, 'api');
+    expect(find.text('当前 API：API'), findsOneWidget);
+    await tester.tap(find.byKey(
+      const ValueKey('image-model-option-grok-imagine-image-2.0')));
     await tester.pumpAndSettle();
 
     final container = ProviderScope.containerOf(
       tester.element(find.byType(BottomInputBar)),
     );
     final settings = container.read(settingsProvider);
-    expect(settings.activeProfileId, 'api-grok');
+    expect(settings.activeProfileId, 'api');
+    expect(settings.profiles, hasLength(2));
     expect(settings.activeProfile.model, 'grok-imagine-image-2.0');
-    // Image 配置的模型名保持原样，两个协议的选择互不影响。
-    expect(settings.profileById('api')!.model, 'gpt-image-2');
-    expect(
-      tester.widget<Text>(find.byKey(const Key('image-model-chip-label'))).data,
-      'grok-imagine-image-2.0',
+    expect(settings.activeProfile.baseUrl, _apiProfile.baseUrl);
+    expect(settings.activeProfile.apiKey, _apiProfile.apiKey);
+    expect(settings.profileById('api-grok')!.toJson(), _xaiProfile.toJson());
+    expect(tester.widget<Text>(
+      find.byKey(const Key('image-model-chip-label'))).data,
+      'grok-imagine-image-2.0');
+    final preferences = await SharedPreferences.getInstance();
+    expect(SettingsController.loadFromPreferences(preferences)
+      .activeProfile.model, 'grok-imagine-image-2.0');
+
+    await tester.enterText(find.byKey(const Key('prompt-input')), '湖边木屋');
+    await tester.tap(find.byKey(const Key('submit-generation-button')));
+    await tester.pump();
+    expect(submittedRequest?.apiProfileId, 'api');
+  });
+
+  testWidgets('cached models reopen without fetching and can be refreshed',
+    (tester) async {
+    final api = _StubModelListApi();
+    final cachedProfile = _apiProfile.copyWith(
+      availableModels: ['gpt-image-2', 'custom-draw-model'],
     );
+    await _pumpInputBar(tester,
+      settings: _settings.copyWith(profiles: [cachedProfile]),
+      modelListApi: api,
+    );
+    await tester.tap(find.byTooltip('切换生图模型'));
+    await tester.pumpAndSettle();
+    expect(api.calls, 0);
+    await tester.enterText(find.byKey(const Key('image-model-search')), 'custom');
+    await tester.pumpAndSettle();
+    expect(find.text('custom-draw-model'), findsOneWidget);
+    await tester.tap(find.text('custom-draw-model'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('切换生图模型'));
+    await tester.pumpAndSettle();
+    expect(api.calls, 0);
+    await tester.tap(find.byTooltip('刷新模型列表'));
+    await tester.pumpAndSettle();
+    expect(api.calls, 1);
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(BottomInputBar)));
+    expect(container.read(settingsProvider).activeProfile.availableModels,
+      contains('gpt-image-2.5-flare'));
+  });
+
+  testWidgets('model search can find all models and enter a custom ID',
+    (tester) async {
+    await _pumpInputBar(tester);
+    await tester.tap(find.byTooltip('切换生图模型'));
+    await tester.pumpAndSettle();
+    expect(find.text('text-chat-model'), findsNothing);
+    await tester.tap(find.text('显示全部模型'));
+    await tester.pumpAndSettle();
+    final allModels = find.byKey(
+      const ValueKey('image-model-option-text-chat-model'));
+    await tester.ensureVisible(allModels);
+    expect(allModels, findsOneWidget);
+
+    await tester.enterText(find.byKey(const Key('image-model-search')),
+      'provider-custom-draw');
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('use-custom-image-model')));
+    await tester.pumpAndSettle();
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(BottomInputBar)));
+    expect(container.read(settingsProvider).activeProfile.model,
+      'provider-custom-draw');
+    expect(container.read(settingsProvider).profiles, hasLength(1));
+  });
+
+  testWidgets('failed model discovery keeps manual selection usable',
+    (tester) async {
+    await _pumpInputBar(tester,
+      modelListApi: _StubModelListApi(error: '模型接口暂不可用'));
+    await tester.tap(find.byTooltip('切换生图模型'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('image-model-error')), findsOneWidget);
+    expect(find.textContaining('模型接口暂不可用'), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('image-model-search')),
+      'custom-image-v1');
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('use-custom-image-model')));
+    await tester.pumpAndSettle();
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(BottomInputBar)));
+    expect(container.read(settingsProvider).activeProfile.model,
+      'custom-image-v1');
   });
 }
 
 Future<void> _pumpInputBar(
   WidgetTester tester, {
   PromptOptimizationApi? promptOptimizationApi,
+  ModelListApi? modelListApi,
   SettingsModel settings = _settings,
   GlobalKey<BottomInputBarState>? inputBarKey,
   Future<void> Function(GenerationRequest request)? onSubmit,
@@ -258,6 +342,9 @@ Future<void> _pumpInputBar(
       overrides: [
         sharedPreferencesProvider.overrideWithValue(preferences),
         initialSettingsModelProvider.overrideWithValue(settings),
+        modelListApiProvider.overrideWithValue(
+          modelListApi ?? _StubModelListApi(),
+        ),
         promptOptimizationApiProvider.overrideWithValue(
           promptOptimizationApi ?? const PromptOptimizationApi(),
         ),
@@ -373,6 +460,33 @@ final _webpRecord = ImageRecord(
   usedSingleImageFallback: false,
   isFavorite: false,
 );
+
+class _StubModelListApi extends ModelListApi {
+  _StubModelListApi({this.error});
+
+  final String? error;
+  int calls = 0;
+  ApiProfile? requestedProfile;
+
+  @override
+  Future<List<String>> fetchImageGenerationModels({
+    required ApiProfile profile,
+    required int timeoutSeconds,
+    CancelToken? cancelToken,
+  }) async {
+    calls++;
+    requestedProfile = profile;
+    if (error != null) {
+      throw ApiException(error!);
+    }
+    return [
+      'gpt-image-2',
+      'gpt-image-2.5-flare',
+      'grok-imagine-image-2.0',
+      'text-chat-model',
+    ];
+  }
+}
 
 class _BlockingPromptOptimizationApi extends PromptOptimizationApi {
   _BlockingPromptOptimizationApi();

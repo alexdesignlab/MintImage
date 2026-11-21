@@ -37,6 +37,7 @@ class _ApiProfileEditPageState extends ConsumerState<ApiProfileEditPage> {
   bool _useStreaming = false;
   CancelToken? _modelListCancelToken;
   List<String> _modelOptions = const [];
+  ApiProfile? _modelListProfile;
   late ImageGenerationApiMode _apiMode;
 
   ApiProfile? get _editingProfile => widget.profile;
@@ -57,7 +58,10 @@ class _ApiProfileEditPageState extends ConsumerState<ApiProfileEditPage> {
     _baseUrlController.text = profile?.baseUrl ?? _apiMode.defaultBaseUrl;
     _apiKeyController.text = profile?.apiKey ?? '';
     _modelController.text = profile?.model ?? _apiMode.defaultModel;
-    _modelOptions = _defaultModelOptionsFor(_apiMode);
+    _modelOptions = profile != null && profile.availableModels.isNotEmpty
+        ? profile.availableModels
+        : _defaultModelOptionsFor(_apiMode);
+    _modelListProfile = profile;
 
     _nameController.addListener(_refresh);
     _baseUrlController.addListener(_refresh);
@@ -111,7 +115,7 @@ class _ApiProfileEditPageState extends ConsumerState<ApiProfileEditPage> {
                     Text('连接信息', style: Theme.of(context).textTheme.titleLarge),
                     const SizedBox(height: 6),
                     Text(
-                      '这里维护单组 Base URL、模型名、API Key 与生图 API。保存后可以直接在主页底部切换。',
+                      '保存一套 Base URL 和 API Key，就能在主页直接选择这个接口下的不同图片模型。',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: AppThemeTokens.textSecondary,
                       ),
@@ -278,6 +282,9 @@ class _ApiProfileEditPageState extends ConsumerState<ApiProfileEditPage> {
 
     final notifier = ref.read(settingsProvider.notifier);
     final existing = _editingProfile;
+    final modelOptions = _matchesModelConnection(_modelListProfile)
+        ? _modelOptions
+        : const <String>[];
     // 不支持流式的模式即便历史配置里开着流式，也要落库为关闭。
     final useStreaming = _apiMode.supportsStreaming && _useStreaming;
 
@@ -290,6 +297,7 @@ class _ApiProfileEditPageState extends ConsumerState<ApiProfileEditPage> {
         apiMode: _apiMode,
         useStreaming: useStreaming,
       );
+      await notifier.setAvailableModels(created.id, modelOptions);
       await notifier.setActiveProfile(created.id);
     } else {
       await notifier.updateProfile(
@@ -298,6 +306,7 @@ class _ApiProfileEditPageState extends ConsumerState<ApiProfileEditPage> {
           baseUrl: _baseUrlController.text.trim(),
           apiKey: _apiKeyController.text.trim(),
           model: _modelController.text.trim(),
+          availableModels: modelOptions,
           apiMode: _apiMode,
           useStreaming: useStreaming,
         ),
@@ -318,7 +327,17 @@ class _ApiProfileEditPageState extends ConsumerState<ApiProfileEditPage> {
     if (mode.isXaiImagine) {
       return xaiImagineModelIds;
     }
-    return const <String>[];
+    return mode == ImageGenerationApiMode.images
+        ? gptImageModelIds
+        : const <String>[];
+  }
+
+  bool _matchesModelConnection(ApiProfile? profile) {
+    return profile != null &&
+        profile.normalizedBaseUrl ==
+            _baseUrlController.text.trim().replaceAll(RegExp(r'/+$'), '') &&
+        profile.apiKey == _apiKeyController.text.trim() &&
+        profile.apiMode == _apiMode;
   }
 
   Future<void> _fetchModels() async {
@@ -337,6 +356,14 @@ class _ApiProfileEditPageState extends ConsumerState<ApiProfileEditPage> {
       return;
     }
 
+    final previewProfile = ApiProfile(
+      id: _editingProfile?.id ?? 'model-list-preview',
+      name: _nameController.text.trim(),
+      baseUrl: baseUrl,
+      apiKey: apiKey,
+      model: _modelController.text.trim(),
+      apiMode: _apiMode,
+    );
     final cancelToken = CancelToken();
     _modelListCancelToken = cancelToken;
     setState(() {
@@ -347,27 +374,19 @@ class _ApiProfileEditPageState extends ConsumerState<ApiProfileEditPage> {
       final models = await ref
           .read(modelListApiProvider)
           .fetchImageGenerationModels(
-            profile: ApiProfile(
-              id: _editingProfile?.id ?? 'model-list-preview',
-              name: _nameController.text.trim().isEmpty
-                  ? '配置'
-                  : _nameController.text.trim(),
-              baseUrl: baseUrl,
-              apiKey: apiKey,
-              model: _modelController.text.trim().isEmpty
-                  ? _apiMode.defaultModel
-                  : _modelController.text.trim(),
-              apiMode: _apiMode,
-            ),
+            profile: previewProfile,
             timeoutSeconds: ref.read(settingsProvider).requestTimeoutSeconds,
             cancelToken: cancelToken,
           );
-      if (!mounted || cancelToken.isCancelled) {
+      if (!mounted ||
+          cancelToken.isCancelled ||
+          !_matchesModelConnection(previewProfile)) {
         return;
       }
 
       setState(() {
         _modelOptions = models;
+        _modelListProfile = previewProfile;
         if (_modelController.text.trim().isEmpty && models.isNotEmpty) {
           _modelController.text = models.first;
         }

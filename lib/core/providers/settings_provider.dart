@@ -78,6 +78,43 @@ class SettingsController extends StateNotifier<SettingsModel> {
     await _persist();
   }
 
+  Future<void> setImageModel(String profileId, String model) async {
+    final normalizedModel = model.trim();
+    final profile = state.profileById(profileId);
+    if (normalizedModel.isEmpty || profile == null) {
+      return;
+    }
+
+    await updateProfile(
+      profile.copyWith(
+        model: normalizedModel,
+        availableModels: _normalizeModels([
+          ...profile.availableModels,
+          normalizedModel,
+        ]),
+      ),
+    );
+  }
+
+  Future<void> setAvailableModels(String profileId, List<String> models) async {
+    final profile = state.profileById(profileId);
+    if (profile == null) {
+      return;
+    }
+
+    await updateProfile(
+      profile.copyWith(availableModels: _normalizeModels(models)),
+    );
+  }
+
+  static List<String> _normalizeModels(List<String> models) {
+    return models
+        .map((model) => model.trim())
+        .where((model) => model.isNotEmpty)
+        .toSet()
+        .toList();
+  }
+
   Future<void> deleteProfile(String id) async {
     if (state.profiles.length <= 1) {
       return;

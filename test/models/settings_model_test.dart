@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mint_image/core/models/builtin_image_models.dart';
 import 'package:mint_image/core/models/generation_request.dart';
 import 'package:mint_image/core/models/settings_model.dart';
 
@@ -90,6 +91,7 @@ void main() {
     expect(decoded.promptOptimizationProfiles, isEmpty);
     expect(decoded.activePromptOptimizationProfile, isNull);
     expect(decoded.activeProfile.apiMode, ImageGenerationApiMode.images);
+    expect(decoded.activeProfile.availableModels, isEmpty);
     expect(decoded.lastSizePreset, SizePreset.auto);
     expect(decoded.lastQuality, ImageQuality.auto);
     expect(decoded.lastOutputFormat, ImageOutputFormat.png);
@@ -107,6 +109,163 @@ void main() {
 
     expect(decoded.activeProfile.apiMode, ImageGenerationApiMode.responses);
     expect(decoded.activeProfile.generationEndpoint, contains('/v1/responses'));
+  });
+
+  group('image model candidates', () {
+    const profile = ApiProfile(
+      id: 'image-api',
+      name: '图像接口',
+      baseUrl: 'https://example.com',
+      apiKey: 'test-key',
+      model: 'gpt-image-2',
+      apiMode: ImageGenerationApiMode.responses,
+      useStreaming: true,
+    );
+
+    test('new profiles default to an empty candidate list', () {
+      expect(profile.availableModels, isEmpty);
+      expect(ApiProfile.initial().availableModels, isEmpty);
+    });
+
+    test('fromJson trims, deduplicates and ignores invalid candidates', () {
+      final decoded = ApiProfile.fromJson({
+        ...profile.toJson(),
+        'availableModels': [
+          ' gpt-image-2 ',
+          null,
+          123,
+          true,
+          {'id': 'ignored'},
+          ['ignored'],
+          '',
+          '   ',
+          'gpt-image-2',
+          ' gpt-image-2.5-sunburst\n',
+          'gpt-image-2.5-sunburst',
+          'provider/custom-model',
+        ],
+      });
+
+      expect(decoded.availableModels, [
+        'gpt-image-2',
+        'gpt-image-2.5-sunburst',
+        'provider/custom-model',
+      ]);
+      expect(decoded.model, profile.model);
+      expect(decoded.baseUrl, profile.baseUrl);
+      expect(decoded.apiKey, profile.apiKey);
+      expect(decoded.apiMode, profile.apiMode);
+      expect(decoded.useStreaming, profile.useStreaming);
+    });
+
+    test('missing or malformed candidate lists remain backwards compatible', () {
+      final legacyJson = profile.toJson()..remove('availableModels');
+      expect(ApiProfile.fromJson(legacyJson).availableModels, isEmpty);
+
+      for (final invalid in <Object?>[null, 'gpt-image-2', 12, {}]) {
+        final decoded = ApiProfile.fromJson({
+          ...legacyJson,
+          'availableModels': invalid,
+        });
+        expect(decoded.availableModels, isEmpty);
+        expect(decoded.model, profile.model);
+      }
+    });
+
+    test('copyWith preserves, replaces and clears the candidate list', () {
+      final populated = profile.copyWith(
+        availableModels: ['gpt-image-2', 'gpt-image-2.5-flare'],
+      );
+
+      expect(populated.copyWith(name: '改名').availableModels, [
+        'gpt-image-2',
+        'gpt-image-2.5-flare',
+      ]);
+      expect(
+        populated.copyWith(availableModels: ['custom-model']).toJson(),
+        {...profile.toJson(), 'availableModels': ['custom-model']},
+      );
+      expect(populated.copyWith(availableModels: []).availableModels, isEmpty);
+      expect(profile.availableModels, isEmpty);
+    });
+
+    test('settings round-trip preserves candidates for each profile', () {
+      final first = profile.copyWith(
+        availableModels: ['gpt-image-2', 'gpt-image-2.5-flare'],
+      );
+      final second = profile.copyWith(
+        id: 'other-api',
+        model: 'grok-imagine-image-2.0',
+        availableModels: ['grok-imagine-image-2.0'],
+      );
+      final settings = SettingsModel(
+        profiles: [first, second],
+        activeProfileId: first.id,
+      );
+
+      final decoded = SettingsModel.decode(settings.encode());
+
+      expect(decoded.toJson(), settings.toJson());
+      expect(decoded.profiles, hasLength(2));
+      expect(decoded.activeProfile.availableModels, first.availableModels);
+      expect(
+        decoded.profileById(second.id)?.availableModels,
+        second.availableModels,
+      );
+    });
+  });
+
+  group('built-in image models', () {
+    test('keeps the GPT Image and xAI candidates available offline', () {
+      expect(gptImageModelIds, [
+        'gpt-image-2',
+        'gpt-image-2.5-flare',
+        'gpt-image-2.5-sunburst',
+      ]);
+      expect(xaiImagineModelIds, [
+        'grok-imagine-image-2.0',
+        'grok-imagine-image-quality',
+        'grok-imagine-image',
+      ]);
+    });
+
+    test('recognizes image model families ignoring case and padding', () {
+      for (final model in [
+        ...gptImageModelIds,
+        ...xaiImagineModelIds,
+        ' GEMINI-2.5-FLASH-IMAGE ',
+        'dall-e-3',
+        'dalle-3',
+        'black-forest-labs/FLUX.1-schnell',
+        'imagen-4',
+        'doubao-seedream-4-0',
+        'stable-diffusion-3.5-large',
+        'stable_diffusion',
+        'sdxl-turbo',
+        'ideogram-v3',
+        'recraft-v3',
+        'kolors',
+        'wanx-v1',
+        'hidream-i1-full',
+        'nano-banana-pro',
+      ]) {
+        expect(isLikelyImageModel(model), isTrue, reason: model);
+      }
+    });
+
+    test('does not classify empty or general text model IDs as images', () {
+      for (final model in [
+        '',
+        '   ',
+        'gpt-5.5',
+        'claude-sonnet-4-6',
+        'deepseek-v4.1-flash',
+        'gemini-2.5-flash',
+        'text-embedding-3-large',
+      ]) {
+        expect(isLikelyImageModel(model), isFalse, reason: model);
+      }
+    });
   });
 
   test('legacy b64_json responseFormat is normalized to null', () {
