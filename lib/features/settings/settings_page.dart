@@ -87,11 +87,8 @@ class SettingsPage extends ConsumerWidget {
                         motion: const ScrollMotion(),
                         children: [
                           SlidableAction(
-                            onPressed: (_) async {
-                              await ref
-                                  .read(settingsProvider.notifier)
-                                  .deleteProfile(profile.id);
-                            },
+                            onPressed: (_) =>
+                                _deleteImageProfile(context, ref, profile),
                             backgroundColor: Colors.red.shade400,
                             foregroundColor: Colors.white,
                             icon: Icons.delete_rounded,
@@ -110,6 +107,9 @@ class SettingsPage extends ConsumerWidget {
                           .setActiveProfile(profile.id);
                     },
                     onEdit: () => _openImageEditor(context, profile: profile),
+                    onDelete: settings.profiles.length <= 1
+                        ? null
+                        : () => _deleteImageProfile(context, ref, profile),
                   ),
                 ),
               ),
@@ -145,11 +145,8 @@ class SettingsPage extends ConsumerWidget {
                   motion: const ScrollMotion(),
                   children: [
                     SlidableAction(
-                      onPressed: (_) async {
-                        await ref
-                            .read(settingsProvider.notifier)
-                            .deletePromptOptimizationProfile(profile.id);
-                      },
+                      onPressed: (_) =>
+                          _deletePromptOptimizationProfile(context, ref, profile),
                       backgroundColor: Colors.red.shade400,
                       foregroundColor: Colors.white,
                       icon: Icons.delete_rounded,
@@ -173,6 +170,8 @@ class SettingsPage extends ConsumerWidget {
                       context,
                       profile: profile,
                     ),
+                    onDelete: () =>
+                        _deletePromptOptimizationProfile(context, ref, profile),
                   ),
                 ),
               ),
@@ -227,6 +226,66 @@ class SettingsPage extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  Future<bool> _confirmDeleteProfile(
+    BuildContext context,
+    String name,
+  ) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('删除 API 配置'),
+            content: Text('确定删除「$name」？生成历史和图片会保留。'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppThemeTokens.dangerText,
+                ),
+                child: const Text('确认删除'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  Future<void> _deleteImageProfile(
+    BuildContext context,
+    WidgetRef ref,
+    ApiProfile profile,
+  ) async {
+    if (!await _confirmDeleteProfile(context, profile.name) || !context.mounted) {
+      return;
+    }
+    if (ref.read(settingsProvider).profiles.length <= 1) {
+      _showSnack(context, '至少保留一份生图 API，可编辑替换');
+      return;
+    }
+    await ref.read(settingsProvider.notifier).deleteProfile(profile.id);
+    if (context.mounted) {
+      _showSnack(context, '已删除「${profile.name}」。');
+    }
+  }
+
+  Future<void> _deletePromptOptimizationProfile(
+    BuildContext context,
+    WidgetRef ref,
+    PromptOptimizationProfile profile,
+  ) async {
+    if (!await _confirmDeleteProfile(context, profile.name) || !context.mounted) {
+      return;
+    }
+    await ref.read(settingsProvider.notifier)
+        .deletePromptOptimizationProfile(profile.id);
+    if (context.mounted) {
+      _showSnack(context, '已删除「${profile.name}」。');
+    }
   }
 
   Future<void> _openImageEditor(
@@ -1390,12 +1449,14 @@ class _ImageProfileCard extends StatelessWidget {
     required this.isActive,
     required this.onTap,
     required this.onEdit,
+    required this.onDelete,
   });
 
   final ApiProfile profile;
   final bool isActive;
   final VoidCallback onTap;
   final VoidCallback onEdit;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -1416,6 +1477,8 @@ class _ImageProfileCard extends StatelessWidget {
                   Expanded(
                     child: Text(
                       profile.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w800,
                         color: AppThemeTokens.textPrimary,
@@ -1449,6 +1512,10 @@ class _ImageProfileCard extends StatelessWidget {
                       ),
                     ),
                   const SizedBox(width: 8),
+                  _ProfileDeleteButton(
+                    buttonKey: ValueKey('delete-image-profile-${profile.id}'),
+                    onDelete: onDelete,
+                  ),
                   IconButton(
                     tooltip: '编辑',
                     onPressed: onEdit,
@@ -1514,12 +1581,14 @@ class _PromptOptimizationProfileCard extends StatelessWidget {
     required this.isActive,
     required this.onTap,
     required this.onEdit,
+    required this.onDelete,
   });
 
   final PromptOptimizationProfile profile;
   final bool isActive;
   final VoidCallback onTap;
   final VoidCallback onEdit;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -1575,6 +1644,10 @@ class _PromptOptimizationProfileCard extends StatelessWidget {
                       ),
                     ),
                   const SizedBox(width: 8),
+                  _ProfileDeleteButton(
+                    buttonKey: ValueKey('delete-optimizer-profile-${profile.id}'),
+                    onDelete: onDelete,
+                  ),
                   IconButton(
                     tooltip: '编辑',
                     onPressed: onEdit,
@@ -1630,6 +1703,33 @@ class _PromptOptimizationProfileCard extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfileDeleteButton extends StatelessWidget {
+  const _ProfileDeleteButton({required this.buttonKey, required this.onDelete});
+
+  final Key buttonKey;
+  final VoidCallback? onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: onDelete == null
+          ? '至少保留一份生图 API，可编辑替换'
+          : '删除此 API 配置',
+      child: TextButton.icon(
+        key: buttonKey,
+        onPressed: onDelete,
+        icon: const Icon(Icons.delete_outline_rounded, size: 18),
+        label: const Text('删除'),
+        style: TextButton.styleFrom(
+          foregroundColor: AppThemeTokens.dangerText,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          minimumSize: const Size(64, 34),
         ),
       ),
     );

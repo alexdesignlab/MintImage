@@ -1,4 +1,4 @@
-name: Model Selector Windows Build
+name: MintImage Windows Preview Build
 
 on:
   push:
@@ -39,17 +39,17 @@ jobs:
         run: flutter test --reporter expanded
 
       - name: Build Windows application
-        run: flutter build windows --release --build-name 0.0.27 --build-number ${{ github.run_number }} --dart-define APP_VERSION=v0.0.27-model-selector
+        run: flutter build windows --release --build-name 0.0.28 --build-number ${{ github.run_number }} --dart-define APP_VERSION=v0.0.28
 
       - name: Package portable application
         shell: pwsh
         run: |
-          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath MintImage-Windows-model-selector.zip
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath MintImage-Windows-0.0.28.zip
 
       - name: Build Windows installer
         shell: pwsh
         run: |
-          $env:MINTIMAGE_VERSION = '0.0.27'
+          $env:MINTIMAGE_VERSION = '0.0.28'
           $env:MINTIMAGE_RELEASE_DIR = Join-Path $env:GITHUB_WORKSPACE 'build/windows/x64/runner/Release'
           $env:MINTIMAGE_OUTPUT_DIR = $env:GITHUB_WORKSPACE
           & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' 'installer/mint_image.iss'
@@ -57,9 +57,9 @@ jobs:
 
       - uses: actions/upload-artifact@v6
         with:
-          name: MintImage-Windows-model-selector
+          name: MintImage-Windows-0.0.28
           path: |
-            MintImage-Windows-model-selector.zip
-            MintImage-Setup-0.0.27.exe
+            MintImage-Windows-0.0.28.zip
+            MintImage-Setup-0.0.28.exe
           if-no-files-found: error
           retention-days: 30
