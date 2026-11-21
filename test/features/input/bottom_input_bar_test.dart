@@ -324,6 +324,58 @@ void main() {
     expect(container.read(settingsProvider).activeProfile.model,
       'custom-image-v1');
   });
+  testWidgets('model picker works in a narrow view with the keyboard open',
+    (tester) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewInsets);
+    await _pumpInputBar(tester, settings: _settings.copyWith(profiles: [
+      _apiProfile.copyWith(availableModels: ['gpt-image-2']),
+    ]));
+    await tester.tap(find.byTooltip('切换生图模型'));
+    await tester.pumpAndSettle();
+    tester.view.viewInsets = const FakeViewPadding(bottom: 280);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('image-model-search')),
+      'narrow-view-image-model');
+    await tester.pumpAndSettle();
+    final customOption = find.byKey(const Key('use-custom-image-model'));
+    await tester.ensureVisible(customOption);
+    await tester.tap(customOption);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(BottomInputBar)));
+    expect(container.read(settingsProvider).activeProfile.model,
+      'narrow-view-image-model');
+  });
+
+  testWidgets('closing model picker cancels discovery and ignores late results',
+    (tester) async {
+    final api = _PendingModelListApi();
+    await _pumpInputBar(tester, modelListApi: api);
+    await tester.tap(find.byTooltip('切换生图模型'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(api.cancelToken, isNotNull);
+    expect(find.byKey(const Key('image-model-loading')), findsOneWidget);
+
+    Navigator.of(tester.element(
+      find.byKey(const Key('image-model-search')))).pop();
+    await tester.pumpAndSettle();
+    expect(api.cancelToken!.isCancelled, isTrue);
+    api.response.complete(['late-image-model']);
+    await tester.pump();
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(BottomInputBar)));
+    expect(container.read(settingsProvider).activeProfile.model, 'gpt-image-2');
+    expect(container.read(settingsProvider).activeProfile.availableModels,
+      isEmpty);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 Future<void> _pumpInputBar(
@@ -460,6 +512,21 @@ final _webpRecord = ImageRecord(
   usedSingleImageFallback: false,
   isFavorite: false,
 );
+
+class _PendingModelListApi extends ModelListApi {
+  final response = Completer<List<String>>();
+  CancelToken? cancelToken;
+
+  @override
+  Future<List<String>> fetchImageGenerationModels({
+    required ApiProfile profile,
+    required int timeoutSeconds,
+    CancelToken? cancelToken,
+  }) {
+    this.cancelToken = cancelToken;
+    return response.future;
+  }
+}
 
 class _StubModelListApi extends ModelListApi {
   _StubModelListApi({this.error});

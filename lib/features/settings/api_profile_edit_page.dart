@@ -36,11 +36,16 @@ class _ApiProfileEditPageState extends ConsumerState<ApiProfileEditPage> {
   bool _fetchingModels = false;
   bool _useStreaming = false;
   CancelToken? _modelListCancelToken;
-  List<String> _modelOptions = const [];
+  // Built-in fallbacks are displayed separately and never become saved cache.
+  List<String> _cachedModelOptions = const [];
   ApiProfile? _modelListProfile;
   late ImageGenerationApiMode _apiMode;
 
   ApiProfile? get _editingProfile => widget.profile;
+
+  List<String> get _modelOptions => _matchesModelConnection(_modelListProfile)
+      ? _cachedModelOptions
+      : _defaultModelOptionsFor(_apiMode);
 
   @override
   void initState() {
@@ -58,13 +63,14 @@ class _ApiProfileEditPageState extends ConsumerState<ApiProfileEditPage> {
     _baseUrlController.text = profile?.baseUrl ?? _apiMode.defaultBaseUrl;
     _apiKeyController.text = profile?.apiKey ?? '';
     _modelController.text = profile?.model ?? _apiMode.defaultModel;
-    _modelOptions = profile != null && profile.availableModels.isNotEmpty
-        ? profile.availableModels
-        : _defaultModelOptionsFor(_apiMode);
-    _modelListProfile = profile;
+    if (profile != null && profile.availableModels.isNotEmpty) {
+      _cachedModelOptions = profile.availableModels;
+      _modelListProfile = profile;
+    }
 
     _nameController.addListener(_refresh);
     _baseUrlController.addListener(_refresh);
+    _apiKeyController.addListener(_refresh);
     _modelController.addListener(_refresh);
   }
 
@@ -73,6 +79,7 @@ class _ApiProfileEditPageState extends ConsumerState<ApiProfileEditPage> {
     _modelListCancelToken?.cancel();
     _nameController.removeListener(_refresh);
     _baseUrlController.removeListener(_refresh);
+    _apiKeyController.removeListener(_refresh);
     _modelController.removeListener(_refresh);
     _nameController.dispose();
     _baseUrlController.dispose();
@@ -206,7 +213,6 @@ class _ApiProfileEditPageState extends ConsumerState<ApiProfileEditPage> {
                               baseUrl == previousMode.defaultBaseUrl) {
                             _baseUrlController.text = mode.defaultBaseUrl;
                           }
-                          _modelOptions = _defaultModelOptionsFor(mode);
                         });
                       },
                     ),
@@ -283,7 +289,7 @@ class _ApiProfileEditPageState extends ConsumerState<ApiProfileEditPage> {
     final notifier = ref.read(settingsProvider.notifier);
     final existing = _editingProfile;
     final modelOptions = _matchesModelConnection(_modelListProfile)
-        ? _modelOptions
+        ? _cachedModelOptions
         : const <String>[];
     // 不支持流式的模式即便历史配置里开着流式，也要落库为关闭。
     final useStreaming = _apiMode.supportsStreaming && _useStreaming;
@@ -385,7 +391,7 @@ class _ApiProfileEditPageState extends ConsumerState<ApiProfileEditPage> {
       }
 
       setState(() {
-        _modelOptions = models;
+        _cachedModelOptions = models;
         _modelListProfile = previewProfile;
         if (_modelController.text.trim().isEmpty && models.isNotEmpty) {
           _modelController.text = models.first;
